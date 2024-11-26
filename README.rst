@@ -19,8 +19,8 @@ Introduction
 ============
 
 ``gremlite`` is a fully functioning, serverless graph database. It uses Python's built-in ``sqlite3``
-module to persist your data to disk, and it understands the Gremlin_ graph query language. (Support
-for the Gremlin language is not yet 100% complete; see below.)
+module to persist your data to disk, and it understands (much of) the Gremlin_ graph query language.
+(See language support below.)
 
 Usage
 =====
@@ -127,7 +127,7 @@ documentation on the use and meaning of these steps. For that, please see the of
 * ``and_``
 
   - 1 or more traversals: allow the incoming result to pass through iff it produces at
-    least one result in *all* of the given traversals.
+    least one result in *each* of the given traversals.
 
 * ``as_``
 
@@ -172,7 +172,7 @@ documentation on the use and meaning of these steps. For that, please see the of
 
 * ``coalesce``
 
-  - 1 or more traversals: move to the first traversal that returns at least one result
+  - 1 or more traversals: carry out the first traversal that returns at least one result
 
 * ``constant``
 
@@ -180,16 +180,16 @@ documentation on the use and meaning of these steps. For that, please see the of
 
 * ``count``
 
-  - 0 args: return the number of hits
+  - 0 args: return the total number of results produced by all the foregoing steps
 
 * ``drop``
 
-  - 0 args: fully drop the incoming object (property, edge, or vertex)
+  - 0 args: fully drop (delete) the incoming object (property, edge, or vertex) from the database
 
 * ``element_map``
 
-  - 0 args: find all properties
-  - 1 or more strings: find only properties having these names
+  - 0 args: include all existing properties
+  - 1 or more strings: include only properties having these names
 
 * ``emit``
 
@@ -202,14 +202,15 @@ documentation on the use and meaning of these steps. For that, please see the of
 
 * ``fold``
 
-  - 0 args: turn all incoming results into a single list
+  - 0 args: gather all incoming results into a single list
 
 * ``has``
 
   - ``(key)``: keep only those objects that have property ``key`` at all, with no
     constraint on the value.
   - ``(key, value)``: keep only those objects that have property ``key``
-    with value ``value``. The ``value`` may be a string or a ``TextP`` or ``P`` operator.
+    with value ``value``. The ``value`` may be ``None``, boolean, int, float, string,
+    or a ``TextP`` or ``P`` operator.
   - ``(label, key, value)``: shorthand for ``.has_label(label).has(key, value)``
 
 * ``has_label``
@@ -291,7 +292,7 @@ documentation on the use and meaning of these steps. For that, please see the of
 
 * ``path``
 
-  - 0 args: return the path of vertices and edges visited so far
+  - 0 args: return the path of objects visited so far
 
 * ``project``
 
@@ -304,7 +305,8 @@ documentation on the use and meaning of these steps. For that, please see the of
 
 * ``property``
 
-  - ``(key, value)``: set a property value, with ``single`` cardinality.
+  - ``(key, value)``: set a property value, with ``single`` cardinality. The ``value`` may be
+    ``None``, boolean, int, float, or string.
   - ``(Cardinality, key, value)``: pass a value of the ``gremlin_python.process.traversal.Cardinality`` enum
     to set the property with that cardinality. The ``list_`` and ``set_`` cardinalities are supported
     only on vertices, not on edges.
@@ -336,8 +338,8 @@ documentation on the use and meaning of these steps. For that, please see the of
 
 * ``union``
 
-  - 0 or more traversals: produce a concatenation of all the results at which these
-    traversals arrive. (Repeats are *not* eliminated.)
+  - 0 or more traversals: produce all the results produced by these traversals, in the order given.
+    (Repeats are *not* eliminated.)
 
 * ``until``
 
@@ -350,21 +352,24 @@ documentation on the use and meaning of these steps. For that, please see the of
 
 * ``value_map``
 
-  - 0 args: find all properties
-  - 1 or more strings: find only properties having these names
+  - 0 args: include all existing properties
+  - 1 or more strings: include only properties having these names
   - a boolean arg may be prepended to any of the above cases, to say whether the
-    ID and label of the object should included (default ``False``)
+    ID and label of the object should be included (default ``False``)
 
 * ``values``
 
   - ``values(*args)`` is essentially a shorthand for ``properties(*args).value()``
-  - 0 args: iterate over *all* properties of the incoming object
+  - 0 args: iterate over *all* properties of the incoming object, and produce only the value,
+    not the whole property.
   - 1 or more strings: restrict to properties having *any* of these names
 
 * ``where``
 
   - 1 traversal: allow the incoming result to pass through iff it produces at
     least one result in the given traversal.
+    Note: This may seem like an ``and()`` step restricted to a single traversal, but it is
+    actually more powerful because it can also do pattern matching; see ``as_()`` step.
 
 
 Support for Predicates
@@ -393,6 +398,6 @@ to do it yet. So if you are missing something, please `open an issue`_.
 
 .. _Gremlin: https://tinkerpop.apache.org/gremlin.html
 .. _gremlinpython: https://pypi.org/project/gremlinpython/
-.. _open an issue: https://github.com/skieffer/gremlite
+.. _open an issue: https://github.com/skieffer/gremlite/issues
 .. _Gremlin documentation: https://tinkerpop.apache.org/docs/current/reference/#graph-traversal-steps
 .. _pattern matching using where: https://kelvinlawrence.net/book/Gremlin-Graph-Guide.html#patternwhere
