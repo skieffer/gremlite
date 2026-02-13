@@ -22,6 +22,15 @@ GremLite is a fully functioning, serverless graph database. It uses Python's bui
 module to persist your data to disk, and it understands (much of) the Gremlin_ graph query language.
 (See language support below.)
 
+Requirements
+============
+
+SQLite 3.35 or later is required. You can check your version with:
+
+.. code-block:: shell
+
+   $ python -c "import sqlite3; print(sqlite3.sqlite_version)"
+
 Usage
 =====
 
