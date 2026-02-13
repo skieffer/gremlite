@@ -179,6 +179,9 @@ class GremliteConfig:
         # of the Gremlin values those are meant to produce.
         self.traversal_returns_internal_result_iterator = False
 
+        # This is purely for testing purposes. It helps us test the code that checks the SQLite version.
+        self.phony_testing_sqlite_version_string = None
+
 
 class Step:
     """

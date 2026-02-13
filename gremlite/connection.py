@@ -35,6 +35,57 @@ import gremlite.querytools as qt
 from .steps import bytecode_to_producer_chain
 
 
+# At least due to our use of keyword "RETURNING" (it is used in many places
+# in the `querytools.py` module), we need SQLite 3.35 or later.
+REQUIRED_SQLITE_MINIMUM_VERSION = (3, 35)
+
+
+class InsufficientSQLiteVersionException(Exception):
+
+    def __init__(self, detected_version, extra_phrase=None):
+        self.detected_version = detected_version
+        self.extra_phrase = extra_phrase or ' '
+
+    def __str__(self):
+        major, minor = REQUIRED_SQLITE_MINIMUM_VERSION
+        msg = f'GremLite requires SQLite {major}.{minor}.x or later'
+        msg += f', but version {self.detected_version}{self.extra_phrase}was detected.'
+        return msg
+
+
+def check_sqlite_version(config: GremliteConfig):
+    """
+    Check that we are using an acceptable version of SQLite.
+
+    :param config: this is used for testing purposes
+    :return: nothing
+    :raises: InsufficientSQLiteVersionException
+    """
+    version_string = sqlite3.sqlite_version
+
+    if config.phony_testing_sqlite_version_string is not None:
+        version_string = config.phony_testing_sqlite_version_string
+
+    parts = version_string.split('.')
+
+    # If version not in three parts, we don't know how to read it:
+    if len(parts) != 3:
+        raise InsufficientSQLiteVersionException(
+            version_string, extra_phrase=' of unrecognized format '
+        )
+
+    # I hope at least major and minor are always integers, but just in case:
+    try:
+        major, minor = [int(p) for p in parts[:2]]
+    except ValueError:
+        raise InsufficientSQLiteVersionException(
+            version_string, extra_phrase=' with non-integer component(s) '
+        )
+
+    if (major, minor) < REQUIRED_SQLITE_MINIMUM_VERSION:
+        raise InsufficientSQLiteVersionException(version_string)
+
+
 def get_g(db_file_path,
           autocommit=None, isolation_level="DEFERRED", timeout=5.0,
           log_plans=False, session=None, config: GremliteConfig = None):
@@ -119,6 +170,7 @@ class SQLiteConnection:
 
         self.__session = session
         self.config = config or GremliteConfig()
+        check_sqlite_version(self.config)
 
         ConnectionClass = LoggingConnection if log_plans else sqlite3.Connection
         self.con = ConnectionClass(self.db_file_path, timeout=timeout)

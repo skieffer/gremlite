@@ -29,7 +29,7 @@ import gremlin_python.structure.graph as graph
 from tests.cull_log import cull_log
 from gremlite.connection import (
     SQLiteConnection, db_already_initialized, expected_index_names,
-    GremliteConfig, get_g, quad_index_names,
+    GremliteConfig, get_g, quad_index_names, InsufficientSQLiteVersionException,
 )
 from gremlite.errors import (
     UnsupportedUsage, BadStepArgs, BadStepCombination,
@@ -195,6 +195,33 @@ def test_make_mini_air_routes_graph():
         rc = remote.table_stats()
         print('\n', rc)
         assert str(rc) == '(qe: 9, qvl: 5, qvp: 5, qep: 0, gv: 0, ge: 0, gvp: 0, s: 9)'
+
+
+@pytest.mark.parametrize(['phony_version', 'expected_error'], [
+    # This first case checks the actual SQLite version on the machine where the unit
+    # tests are running. If they are to pass as a whole, this has to be a sufficient version!
+    [None, None],
+    # For the other cases, we try a series of phony versions, to cover the various possibilities.
+    ['4.0.0', None],
+    ['3.36.10-alpha', None],
+    ['3.35.0', None],
+    ['3.34.17', InsufficientSQLiteVersionException('3.34.17')],
+    ['2.3.5', InsufficientSQLiteVersionException('2.3.5')],
+    ['1.2', InsufficientSQLiteVersionException('1.2', extra_phrase=' of unrecognized format ')],
+    ['3.foo.7', InsufficientSQLiteVersionException('3.foo.7', extra_phrase=' with non-integer component(s) ')]
+])
+def test_check_sqlite_version(phony_version, expected_error):
+    with tempfile.TemporaryDirectory() as dirname:
+        config = GremliteConfig()
+        if phony_version is not None:
+            config.phony_testing_sqlite_version_string = phony_version
+
+        if expected_error is None:
+            get_basic_setup(dirname, config=config)
+        else:
+            with pytest.raises(InsufficientSQLiteVersionException) as e:
+                get_basic_setup(dirname, config=config)
+            assert str(e.value) == str(expected_error)
 
 
 def test_get_g():
