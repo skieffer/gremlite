@@ -799,17 +799,47 @@ def test_coalesce():
     with tempfile.TemporaryDirectory() as dirname:
         g, remote = get_basic_setup(dirname)
 
+        # The first continuation is empty. We get a result from the second continuation.
         result = g.V().has('airport', 'code', 'AUS').coalesce(
             __.out().out().has('code', 'ATL').constant(1),
             __.out().has('code', 'ATL').constant(2)
         ).next()
         assert result == 2
 
+        # Both continuations are empty. We get no results.
         result = g.V().has('airport', 'code', 'AUS').coalesce(
             __.out().out().has('code', 'ATL').constant(1),
             __.out().out().has('code', 'ATL').constant(2)
         ).has_next()
         assert result is False
+
+        # We read all the values from the second continuation.
+        # There are four results, of which three are distinct.
+        result = g.V().has('airport', 'code', 'AUS').coalesce(
+            __.out().out().has('code', 'ATL'),
+            __.out().out().values('code')
+        ).to_list()
+        assert len(result) == 4
+        assert set(result) == {'DFW', 'JFK', 'LAX'}
+
+        # Even when more than one traversal produces results, we stop after
+        # exhausting the first productive one. That's why we get 4 results
+        # here, not 8.
+        result = g.V().has('airport', 'code', 'AUS').coalesce(
+            __.out().out().has('code', 'ATL'),
+            __.out().out().values('code'),
+            __.out().out().values('code')
+        ).to_list()
+        assert len(result) == 4
+
+        # To confirm, we replace `coalesce` with `union` in the above test, and
+        # see that then not just 4, but 8 results are produced.
+        result = g.V().has('airport', 'code', 'AUS').union(
+            __.out().out().has('code', 'ATL'),
+            __.out().out().values('code'),
+            __.out().out().values('code')
+        ).to_list()
+        assert len(result) == 8
 
 
 def test_filtering_strategies():
