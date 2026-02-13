@@ -19,10 +19,12 @@ Implements a simple adapter so that the Gremlin query language can be used with 
 module, for a serverless, file-based graph database.
 """
 
+import datetime
 import logging
 import pathlib
 import sqlite3
 import sys
+import time
 import uuid
 
 from gremlin_python.driver.remote_connection import RemoteTraversal
@@ -141,6 +143,7 @@ class SQLiteConnection:
     def __init__(self, db_file_path,
                  autocommit=None, isolation_level="DEFERRED", timeout=5.0,
                  log_plans=False, check_qqc_patterns=False,
+                 log_open_close=False,
                  session=None, config: GremliteConfig = None):
         """
         :param db_file_path: string or pathlib.Path pointing to the file you want
@@ -172,7 +175,11 @@ class SQLiteConnection:
         self.config = config or GremliteConfig()
         check_sqlite_version(self.config)
 
-        ConnectionClass = LoggingConnection if log_plans else sqlite3.Connection
+        ConnectionClass = (
+            PlanLoggingConnection if log_plans else (
+                OpenCloseLoggingConnection if log_open_close else sqlite3.Connection
+            )
+        )
         self.con = ConnectionClass(self.db_file_path, timeout=timeout)
 
         """
@@ -281,14 +288,57 @@ class SQLiteConnection:
         self.con.rollback()
 
 
-class LoggingConnection(sqlite3.Connection):
+def generate_new_uid1(prefix=''):
+    ts = datetime.datetime.now().strftime('%y%m%d-%H%M%S.%f')
+    return f'{prefix}-{ts}-{uuid.uuid4()}'
+
+
+def generate_new_uid2(prefix=''):
+    ts = time.time_ns()
+    return f'{prefix}-{ts}-{uuid.uuid4()}'
+
+
+def generate_new_uid3(prefix=''):
+    return f'{prefix}-{uuid.uuid4()}'
+
+
+generate_new_uid = generate_new_uid3
+
+
+class PlanLoggingConnection(sqlite3.Connection):
 
     def cursor(self):
         sqlite_cursor = super().cursor()
-        return LoggingCursor(sqlite_cursor)
+        return PlanLoggingCursor(sqlite_cursor)
 
 
-class LoggingCursor:
+class OpenCloseLoggingConnection(sqlite3.Connection):
+
+    def __init__(self, database, timeout=5.0):
+        super().__init__(database, timeout=timeout)
+        self.gremlite_uid = generate_new_uid(prefix='CONN')
+        self.logger = logging.getLogger(__name__)
+        self.log('~~~~~~ OP')
+
+    def log(self, action):
+        ts = time.time_ns()
+        msg = f'{action} ({ts}) {self.gremlite_uid}'
+        self.logger.info(msg)
+
+    def cursor(self):
+        sqlite_cursor = super().cursor()
+        return OpenCloseLoggingCursor(self, sqlite_cursor)
+
+    def commit(self) -> None:
+        self.log('CMT')
+        return super().commit()
+
+    def close(self):
+        self.log('~~~~~~ CL')
+        return super().close()
+
+
+class PlanLoggingCursor:
 
     def __init__(self, sqlite_cursor):
         self.sqlite_cursor = sqlite_cursor
@@ -314,6 +364,37 @@ class LoggingCursor:
 
     def close(self):
         return self.sqlite_cursor.close()
+
+
+class OpenCloseLoggingCursor:
+
+    def __init__(self, connection, sqlite_cursor):
+        self.gremlite_uid = generate_new_uid(prefix='CURS')
+        self.connection = connection
+        self.sqlite_cursor = sqlite_cursor
+        self.logger = logging.getLogger(__name__)
+        self.log('OPN')
+
+    def log(self, action, extra=''):
+        ts = time.time_ns()
+        msg = f'{action} ({ts}) {self.gremlite_uid} {self.connection.gremlite_uid} {extra}'
+        self.logger.info(msg)
+
+    def execute(self, sql, params=None):
+        params = params or []
+        self.log('EXC', extra=sql)
+        return self.sqlite_cursor.execute(sql, params)
+
+    def fetchone(self):
+        return self.sqlite_cursor.fetchone()
+
+    def fetchall(self):
+        return self.sqlite_cursor.fetchall()
+
+    def close(self):
+        result = self.sqlite_cursor.close()
+        self.log('CLS')
+        return result
 
 
 # These are the indexes that we use, on the quads table:
