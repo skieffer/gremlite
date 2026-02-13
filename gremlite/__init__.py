@@ -20,4 +20,4 @@ __all__ = [
     'get_g', 'SQLiteConnection', 'GremliteConfig',
 ]
 
-__version__ = '0.1.2'
+__version__ = '0.37.0-dev'
