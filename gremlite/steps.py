@@ -476,7 +476,7 @@ class Key(EvaluatorProducer, PropertyConsumerProducer):
 
 class Value(EvaluatorProducer, PropertyConsumerProducer):
     """
-    key() step
+    value() step
     """
 
     def build(self, ss: StepStream):

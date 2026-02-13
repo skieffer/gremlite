@@ -93,12 +93,17 @@ class SQLiteConnection:
                  session=None, config: GremliteConfig = None):
         """
         :param db_file_path: string or pathlib.Path pointing to the file you want
-            to use for your on-disk database with SQLite.
+            to use for your on-disk database with SQLite. The file can be a pre-existing one, from a
+            previous use of GremLite, or else should not yet exist (for an initial use of GremLite).
+            In all cases, the directory named by the path must already exist.
         :param autocommit: Set to a boolean value to control transactions as in Python 3.12 and forward.
             See https://docs.python.org/3.12/library/sqlite3.html#transaction-control
-        :param isolation_level: If not setting the `autocommit` kwarg, use this to control transactions
+            To be clear, you can use the ``autocommit`` kwarg here even if you are using a version of
+            Python prior to 3.12. This library interprets it for you.
+        :param isolation_level: If not setting the ``autocommit`` kwarg, use this to control transactions
             as in Python versions prior to 3.12.
             See https://docs.python.org/3.8/library/sqlite3.html#controlling-transactions
+            At time of writing, Python versions 3.12 and later also continue to support ``isolation_level``.
         :param timeout: number of seconds to wait to acquire transaction locks (default 5.0 s)
         :param log_plans: set True to record query plans via INFO-level logging
         :param check_qqc_patterns: set True to raise an exception if any unexpected "quad query constraint"
@@ -423,8 +428,8 @@ def initialize_db(con: sqlite3.Connection):
     It follows that each quad type can be recognized immediately by a single column condition:
 
         Vertex: p = 0
-        Edge:   p < 0 or g < 0
-        Prop:   p > 0
+        Edge:   p < 0 or g < 0 (either condition on its own is sufficient)
+        Prop:   p > 0 (this identifies a property of any kind, vertex or edge)
         V Prop: g > 0
         E Prop: s < 0
 

@@ -18,14 +18,14 @@
 Introduction
 ============
 
-``gremlite`` is a fully functioning, serverless graph database. It uses Python's built-in ``sqlite3``
+GremLite is a fully functioning, serverless graph database. It uses Python's built-in ``sqlite3``
 module to persist your data to disk, and it understands (much of) the Gremlin_ graph query language.
 (See language support below.)
 
 Usage
 =====
 
-``gremlite`` is designed to integrate seamlessly with `gremlinpython`_, the official Python package
+The ``gremlite`` package is designed to integrate seamlessly with `gremlinpython`_, the official Python package
 for connecting to Apache TinkerPop :sup:`TM` graph database systems.
 
 Whereas ordinary usage of ``gremlinpython`` to connect to an acutal Gremlin server might look
@@ -40,7 +40,7 @@ like this:
     remote = DriverRemoteConnection(uri)
     g = traversal().with_remote(remote)
 
-connecting to ``gremlite`` instead looks like this:
+usage with ``gremlite`` instead looks like this:
 
 .. code-block:: python
 
@@ -53,6 +53,13 @@ connecting to ``gremlite`` instead looks like this:
 
 That's it. You don't have to set up any tables or indexes. Just start using ``g`` to make
 graph traversals as you would with any other graph database.
+
+In the example, we chose to have our on-disk database file live at
+``/filesystem/path/to/my_sqlite_database_file.db``. The first time you use a given database file with
+GremLite, you must ensure that the directory in which it is to live (like ``/filesystem/path/to`` in our
+example) already exists. The file itself however (like ``my_sqlite_database_file.db``) should not yet exist;
+GremLite will create it for you. When you want to continue using the same database on subsequent connections,
+simply reuse the same path.
 
 Committing your changes
 -----------------------
