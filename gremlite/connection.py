@@ -21,6 +21,7 @@ module, for a serverless, file-based graph database.
 
 import datetime
 import logging
+import os
 import pathlib
 import sqlite3
 import sys
@@ -318,11 +319,12 @@ class OpenCloseLoggingConnection(sqlite3.Connection):
         super().__init__(database, timeout=timeout)
         self.gremlite_uid = generate_new_uid(prefix='CONN')
         self.logger = logging.getLogger(__name__)
-        self.log('~~~~~~ OP')
+        note_pid = f'PID={os.getpid()}'
+        self.log('~~~~~~ OP', extra=note_pid)
 
-    def log(self, action):
+    def log(self, action, extra=''):
         ts = time.time_ns()
-        msg = f'{action} ({ts}) {self.gremlite_uid}'
+        msg = f'{action} ({ts}) {self.gremlite_uid} {extra}'
         self.logger.info(msg)
 
     def cursor(self):
