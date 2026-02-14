@@ -26,6 +26,7 @@ import pathlib
 import sqlite3
 import sys
 import time
+import traceback
 import uuid
 
 from gremlin_python.driver.remote_connection import RemoteTraversal
@@ -41,6 +42,9 @@ from .steps import bytecode_to_producer_chain
 # At least due to our use of keyword "RETURNING" (it is used in many places
 # in the `querytools.py` module), we need SQLite 3.35 or later.
 REQUIRED_SQLITE_MINIMUM_VERSION = (3, 35)
+
+
+OPEN_CURSORS = {}
 
 
 class InsufficientSQLiteVersionException(Exception):
@@ -303,7 +307,7 @@ def generate_new_uid3(prefix=''):
     return f'{prefix}-{uuid.uuid4()}'
 
 
-generate_new_uid = generate_new_uid3
+generate_new_uid = generate_new_uid2
 
 
 class PlanLoggingConnection(sqlite3.Connection):
@@ -323,6 +327,9 @@ class OpenCloseLoggingConnection(sqlite3.Connection):
         self.log('~~~~~~ OP', extra=note_pid)
 
     def log(self, action, extra=''):
+        # XXX
+        return
+        #
         ts = time.time_ns()
         msg = f'{action} ({ts}) {self.gremlite_uid} {extra}'
         self.logger.info(msg)
@@ -372,12 +379,19 @@ class OpenCloseLoggingCursor:
 
     def __init__(self, connection, sqlite_cursor):
         self.gremlite_uid = generate_new_uid(prefix='CURS')
+
+        OPEN_CURSORS[self.gremlite_uid] = traceback.format_stack()
+
         self.connection = connection
         self.sqlite_cursor = sqlite_cursor
+
         self.logger = logging.getLogger(__name__)
         self.log('OPN')
 
     def log(self, action, extra=''):
+        # XXX
+        return
+        #
         ts = time.time_ns()
         msg = f'{action} ({ts}) {self.gremlite_uid} {self.connection.gremlite_uid} {extra}'
         self.logger.info(msg)
@@ -396,7 +410,18 @@ class OpenCloseLoggingCursor:
     def close(self):
         result = self.sqlite_cursor.close()
         self.log('CLS')
+        del OPEN_CURSORS[self.gremlite_uid]
         return result
+
+
+def print_open_cursor_traces(limit=5):
+    N = len(OPEN_CURSORS)
+    print(f'There are {N} open cursors.')
+    for uid, trace in list(OPEN_CURSORS.items())[:min(N, limit)]:
+        print("%" * 80)
+        print(uid)
+        for line in trace:
+            print(line)
 
 
 # These are the indexes that we use, on the quads table:
