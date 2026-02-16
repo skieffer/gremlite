@@ -645,24 +645,26 @@ def db_already_initialized(con: sqlite3.Connection):
         used for some other purpose than ours.
     """
     cur = con.cursor()
+    try:
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        actual_table_names = {r[0] for r in cur.fetchall()}
 
-    cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
-    actual_table_names = {r[0] for r in cur.fetchall()}
+        cur.execute("SELECT name FROM sqlite_master WHERE type='index'")
+        actual_index_names = {r[0] for r in cur.fetchall()}
 
-    cur.execute("SELECT name FROM sqlite_master WHERE type='index'")
-    actual_index_names = {r[0] for r in cur.fetchall()}
+        # Among the actual tables and indices, there will be special ones like 'sqlite_sequence'.
+        # We don't want to worry about those, so we just check that all expected ones are present.
+        if expected_table_names.issubset(actual_table_names) and expected_index_names.issubset(actual_index_names):
 
-    # Among the actual tables and indices, there will be special ones like 'sqlite_sequence'.
-    # We don't want to worry about those, so we just check that all expected ones are present.
-    if expected_table_names.issubset(actual_table_names) and expected_index_names.issubset(actual_index_names):
+            # Check that string IDs start at 3
+            R = cur.execute("SELECT rowid FROM strings WHERE rowid <= 3").fetchall()
+            if len(R) != 1 or R[0][0] != 3:
+                raise BadDatabase
 
-        # Check that string IDs start at 3
-        R = cur.execute("SELECT rowid FROM strings WHERE rowid <= 3").fetchall()
-        if len(R) != 1 or R[0][0] != 3:
+            return True
+        elif len(actual_table_names) == 0 and len(actual_index_names) == 0:
+            return False
+        else:
             raise BadDatabase
-
-        return True
-    elif len(actual_table_names) == 0 and len(actual_index_names) == 0:
-        return False
-    else:
-        raise BadDatabase
+    finally:
+        cur.close()
