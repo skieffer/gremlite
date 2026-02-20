@@ -134,28 +134,6 @@ class GremliteConfig:
     def __init__(self):
         ######################################################################################################
         # USER CONFIG
-        #
-        # Certain Gremlin steps, namely
-        #   V(), E(), in(), out(), both(), in_e(), out_e(), both_e()
-        # perform queries against the sqlite database which have the potential to return large sets
-        # of results. These classes are therefore designed to open an `sqlite3.Cursor`, and *keep* it
-        # open while the traversal is being processed, fetching only *one* result from it at a time.
-        #
-        # However, as demonstrated e.g. by our `tests.test_steps.test_locked_database()` test,
-        # there can be issues if one `Connection` is holding a read cursor open for a long time,
-        # while another `Connection` is trying to make changes. In case you are encountering
-        # difficulties with this (which would be signalled by getting an `sqlite3.OperationalError`
-        # saying, "database is locked" after the (default 5.0s) timeout), then you can set this
-        # variable to `True`. This will cause the steps named above to instead fetch *all* results from
-        # their cursors immediately, and then close those cursors.
-        #
-        # An issue of this kind is not expected to arise unless you are working with a busy, multithreaded
-        # system, using multiple connections simultaneously. In particular, note that any single Gremlin
-        # traversal is handled by a single Connection. This is why, for example, a traversal such as
-        #   g.V().drop().iterate()
-        # can work. The `V()` step holds a read cursor open while the `drop()` step is writing, but since
-        # they are both using the same Connection, the database does not become locked.
-        self.read_all_at_once = False
 
         # When a sequence of `has()` steps are used to filter results, it may be more efficient to
         # formulate some of these steps as SQLite queries, while performing others "on the Python side,"
@@ -166,6 +144,29 @@ class GremliteConfig:
         # off by setting this to `False`, and then *all* filter steps in a given sequence will be built
         # into one SQLite query; none will be saved to be performed on the Python side.
         self.use_basic_heuristic_filtering = True
+
+        ######################################################################################################
+        # EXPERIMENTAL
+
+        # Certain Gremlin steps, namely
+        #   V(), E(), in(), out(), both(), in_e(), out_e(), both_e()
+        # perform queries against the sqlite database which have the potential to return large sets
+        # of results.
+        #
+        # By default, these steps will read *all* results out of the underlying sqlite database immediately,
+        # and then close the sqlite cursor. In general, it is important that cursors be closed as soon as
+        # possible, in order to avoid "database locked" errors.
+        #
+        # If you are finding operation slow, you should try to make more restricted queries.
+        # Try to use good filtering, so that queries do not return an excessively large number of results.
+        #
+        # Beyond that, as an *experimental* setting (its use is not recommended) you can set this variable
+        # to `False` to cause the above-named steps to *keep their cursor open*, and read only one sqlite
+        # result at a time.
+        #
+        # At this time, there is nothing in the code to make these cursors eventually close!
+        # So, this is, in all likelihood, a very broken setting. Again, it is not recommended.
+        self.read_all_at_once = True
 
         ######################################################################################################
         # TESTING CONFIG

@@ -30,7 +30,7 @@ def main(log_level):
         path = pathlib.Path(dirname) / 'foo.db'
 
         conf = GremliteConfig()
-        conf.read_all_at_once = True
+        # conf.read_all_at_once = False
 
         # Form two connections to a single database:
         remote1 = SQLiteConnection(path, log_open_close=log_level, config=conf)
