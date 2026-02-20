@@ -96,6 +96,8 @@ def main():
             t1 = time.time()
             print(f'strings{i}: {t1 - t0:.8f}')
 
+        cur.close()
+
 
 if __name__ == "__main__":
     main()
