@@ -19,14 +19,9 @@ Implements a simple adapter so that the Gremlin query language can be used with 
 module, for a serverless, file-based graph database.
 """
 
-import datetime
-import logging
-import os
 import pathlib
 import sqlite3
 import sys
-import time
-import traceback
 import uuid
 
 from gremlin_python.driver.remote_connection import RemoteTraversal
@@ -35,6 +30,7 @@ from gremlin_python.process.traversal import Bytecode
 
 from .base import GremliteConfig, ProducerInternalResultIterator
 from .errors import BadDatabase
+from .logging import OpenCloseLoggingConnection, PlanLoggingConnection
 import gremlite.querytools as qt
 from .steps import bytecode_to_producer_chain
 
@@ -42,9 +38,6 @@ from .steps import bytecode_to_producer_chain
 # At least due to our use of keyword "RETURNING" (it is used in many places
 # in the `querytools.py` module), we need SQLite 3.35 or later.
 REQUIRED_SQLITE_MINIMUM_VERSION = (3, 35)
-
-
-OPEN_CURSORS = {}
 
 
 class InsufficientSQLiteVersionException(Exception):
@@ -147,8 +140,7 @@ class SQLiteConnection:
 
     def __init__(self, db_file_path,
                  autocommit=None, isolation_level="DEFERRED", timeout=5.0,
-                 log_plans=False, check_qqc_patterns=False,
-                 log_open_close=False,
+                 log_plans=False, check_qqc_patterns=False, log_open_close=0,
                  session=None, config: GremliteConfig = None):
         """
         :param db_file_path: string or pathlib.Path pointing to the file you want
@@ -167,6 +159,9 @@ class SQLiteConnection:
         :param log_plans: set True to record query plans via INFO-level logging
         :param check_qqc_patterns: set True to raise an exception if any unexpected "quad query constraint"
             pattern is used. This is mainly for development and diagnostics.
+        :param log_open_close: set to 1 to keep track of open cursors and make their stack traces inspectible
+            via gremlite.logging.print_open_cursor_traces(). Set to 2 to also log open/close events via INFO-level
+            logging. This param does nothing if `log_plans` is True.
         :param session: used internally to start transactions
         :param config: optionally pass a `GremliteConfig` to make settings.
         """
@@ -180,12 +175,14 @@ class SQLiteConnection:
         self.config = config or GremliteConfig()
         check_sqlite_version(self.config)
 
-        ConnectionClass = (
-            PlanLoggingConnection if log_plans else (
-                OpenCloseLoggingConnection if log_open_close else sqlite3.Connection
-            )
-        )
-        self.con = ConnectionClass(self.db_file_path, timeout=timeout)
+        connection_constructor = sqlite3.Connection
+        if log_plans:
+            connection_constructor = PlanLoggingConnection
+        elif log_open_close > 0:
+            connection_constructor = lambda database, timeout=5.0: OpenCloseLoggingConnection(
+                database, timeout=timeout, log_level=log_open_close)
+
+        self.con = connection_constructor(self.db_file_path, timeout=timeout)
 
         """
         The meaning of the Connection's `isolation_level` property is a bit subtle.
@@ -291,137 +288,6 @@ class SQLiteConnection:
 
     def rollback(self):
         self.con.rollback()
-
-
-def generate_new_uid1(prefix=''):
-    ts = datetime.datetime.now().strftime('%y%m%d-%H%M%S.%f')
-    return f'{prefix}-{ts}-{uuid.uuid4()}'
-
-
-def generate_new_uid2(prefix=''):
-    ts = time.time_ns()
-    return f'{prefix}-{ts}-{uuid.uuid4()}'
-
-
-def generate_new_uid3(prefix=''):
-    return f'{prefix}-{uuid.uuid4()}'
-
-
-generate_new_uid = generate_new_uid2
-
-
-class PlanLoggingConnection(sqlite3.Connection):
-
-    def cursor(self):
-        sqlite_cursor = super().cursor()
-        return PlanLoggingCursor(sqlite_cursor)
-
-
-class OpenCloseLoggingConnection(sqlite3.Connection):
-
-    def __init__(self, database, timeout=5.0):
-        super().__init__(database, timeout=timeout)
-        self.gremlite_uid = generate_new_uid(prefix='CONN')
-        self.logger = logging.getLogger(__name__)
-        note_pid = f'PID={os.getpid()}'
-        self.log('~~~~~~ OP', extra=note_pid)
-
-    def log(self, action, extra=''):
-        # XXX
-        return
-        #
-        ts = time.time_ns()
-        msg = f'{action} ({ts}) {self.gremlite_uid} {extra}'
-        self.logger.info(msg)
-
-    def cursor(self):
-        sqlite_cursor = super().cursor()
-        return OpenCloseLoggingCursor(self, sqlite_cursor)
-
-    def commit(self) -> None:
-        self.log('CMT')
-        return super().commit()
-
-    def close(self):
-        self.log('~~~~~~ CL')
-        return super().close()
-
-
-class PlanLoggingCursor:
-
-    def __init__(self, sqlite_cursor):
-        self.sqlite_cursor = sqlite_cursor
-        self.logger = logging.getLogger(__name__)
-
-    def execute(self, sql, params=None):
-        params = params or []
-
-        explain_sql = 'EXPLAIN QUERY PLAN ' + sql
-        self.sqlite_cursor.execute(explain_sql, params)
-        strat = self.sqlite_cursor.fetchall()
-
-        self.logger.info(sql)
-        self.logger.info(strat)
-
-        return self.sqlite_cursor.execute(sql, params)
-
-    def fetchone(self):
-        return self.sqlite_cursor.fetchone()
-
-    def fetchall(self):
-        return self.sqlite_cursor.fetchall()
-
-    def close(self):
-        return self.sqlite_cursor.close()
-
-
-class OpenCloseLoggingCursor:
-
-    def __init__(self, connection, sqlite_cursor):
-        self.gremlite_uid = generate_new_uid(prefix='CURS')
-
-        OPEN_CURSORS[self.gremlite_uid] = traceback.format_stack()
-
-        self.connection = connection
-        self.sqlite_cursor = sqlite_cursor
-
-        self.logger = logging.getLogger(__name__)
-        self.log('OPN')
-
-    def log(self, action, extra=''):
-        # XXX
-        return
-        #
-        ts = time.time_ns()
-        msg = f'{action} ({ts}) {self.gremlite_uid} {self.connection.gremlite_uid} {extra}'
-        self.logger.info(msg)
-
-    def execute(self, sql, params=None):
-        params = params or []
-        self.log('EXC', extra=sql)
-        return self.sqlite_cursor.execute(sql, params)
-
-    def fetchone(self):
-        return self.sqlite_cursor.fetchone()
-
-    def fetchall(self):
-        return self.sqlite_cursor.fetchall()
-
-    def close(self):
-        result = self.sqlite_cursor.close()
-        self.log('CLS')
-        del OPEN_CURSORS[self.gremlite_uid]
-        return result
-
-
-def print_open_cursor_traces(limit=5):
-    N = len(OPEN_CURSORS)
-    print(f'There are {N} open cursors.')
-    for uid, trace in list(OPEN_CURSORS.items())[:min(N, limit)]:
-        print("%" * 80)
-        print(uid)
-        for line in trace:
-            print(line)
 
 
 # These are the indexes that we use, on the quads table:
