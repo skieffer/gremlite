@@ -18,12 +18,25 @@
 For culling open/close events out of the logs
 """
 
+from enum import Enum
 import pathlib
 import re
 import sys
 
 TESTS_DIR = pathlib.Path(__file__).parent
 PROJECT_ROOT = TESTS_DIR.parent
+
+
+class MemberRep(Enum):
+    """
+    Enum for different ways of representing the members of a co-occurence, when printing.
+    """
+    # Just say how many members there are, as a number:
+    count = 'count'
+    # Show number of members as in a histogram (i.e. by a bar of that length):
+    histo = 'histo'
+    # List all the members explicitly:
+    list_all = 'list_all'
 
 
 class CoOccurrence:
@@ -39,16 +52,25 @@ class CoOccurrence:
         self.end_time = None
 
     def __str__(self):
-        #members = [str(m) for m in self.members.values()]
-        #members = "*" * len(self.members)
-        members = len(self.members)
+        return self.to_string()
+
+    def to_string(self, mr: MemberRep = MemberRep.count):
+        if mr == MemberRep.list_all:
+            members = [str(m) for m in self.members.values()]
+        elif mr == MemberRep.histo:
+            members = "*" * len(self.members)
+        else:
+            members = len(self.members)
+
         start = int(self.start_time[8:-3])
+
         if self.end_time is None:
             end = '-' * 8
             delta = 0
         else:
             end = int(self.end_time[8:-3])
             delta = end - start
+
         return f'({start}, {end}, {delta:8d}) {members}'
 
     def __len__(self):
@@ -181,12 +203,12 @@ def main(log_file_path='pytest.log'):
     print()
     print("Connection co-occurrences:")
     for co in co_conns:
-        print(str(co))
+        print(co.to_string(mr=MemberRep.histo))
 
     print()
     print("Cursor co-occurrences:")
     for co in co_cursors:
-        print(str(co))
+        print(co.to_string(mr=MemberRep.histo))
 
 
 if __name__ == "__main__":
