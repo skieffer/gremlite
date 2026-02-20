@@ -340,6 +340,10 @@ documentation on the use and meaning of these steps. For that, please see the of
   - 1 traversal: carry out the traversal as a continuation, but do not return its results; instead,
     return the same incoming results that arrived at this step.
 
+* ``simple_path``
+
+  - 0 args: filter out paths that visit any vertex or edge more than once
+
 * ``store``
 
   - 1 string: store the incoming object in a list by this name
