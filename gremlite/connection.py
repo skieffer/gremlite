@@ -19,7 +19,6 @@ Implements a simple adapter so that the Gremlin query language can be used with 
 module, for a serverless, file-based graph database.
 """
 
-import logging
 import pathlib
 import sqlite3
 import sys
@@ -31,6 +30,7 @@ from gremlin_python.process.traversal import Bytecode
 
 from .base import GremliteConfig, ProducerInternalResultIterator
 from .errors import BadDatabase
+from .logging import OpenCloseLoggingConnection, PlanLoggingConnection
 import gremlite.querytools as qt
 from .steps import bytecode_to_producer_chain
 
@@ -140,7 +140,7 @@ class SQLiteConnection:
 
     def __init__(self, db_file_path,
                  autocommit=None, isolation_level="DEFERRED", timeout=5.0,
-                 log_plans=False, check_qqc_patterns=False,
+                 log_plans=False, check_qqc_patterns=False, log_open_close=0,
                  session=None, config: GremliteConfig = None):
         """
         :param db_file_path: string or pathlib.Path pointing to the file you want
@@ -159,6 +159,9 @@ class SQLiteConnection:
         :param log_plans: set True to record query plans via INFO-level logging
         :param check_qqc_patterns: set True to raise an exception if any unexpected "quad query constraint"
             pattern is used. This is mainly for development and diagnostics.
+        :param log_open_close: set to 1 to keep track of open cursors and make their stack traces inspectible
+            via gremlite.logging.print_open_cursor_traces(). Set to 2 to also log open/close events via INFO-level
+            logging. This param does nothing if `log_plans` is True.
         :param session: used internally to start transactions
         :param config: optionally pass a `GremliteConfig` to make settings.
         """
@@ -172,8 +175,14 @@ class SQLiteConnection:
         self.config = config or GremliteConfig()
         check_sqlite_version(self.config)
 
-        ConnectionClass = LoggingConnection if log_plans else sqlite3.Connection
-        self.con = ConnectionClass(self.db_file_path, timeout=timeout)
+        connection_constructor = sqlite3.Connection
+        if log_plans:
+            connection_constructor = PlanLoggingConnection
+        elif log_open_close > 0:
+            connection_constructor = lambda database, timeout=5.0: OpenCloseLoggingConnection(
+                database, timeout=timeout, log_level=log_open_close)
+
+        self.con = connection_constructor(self.db_file_path, timeout=timeout)
 
         """
         The meaning of the Connection's `isolation_level` property is a bit subtle.
@@ -279,41 +288,6 @@ class SQLiteConnection:
 
     def rollback(self):
         self.con.rollback()
-
-
-class LoggingConnection(sqlite3.Connection):
-
-    def cursor(self):
-        sqlite_cursor = super().cursor()
-        return LoggingCursor(sqlite_cursor)
-
-
-class LoggingCursor:
-
-    def __init__(self, sqlite_cursor):
-        self.sqlite_cursor = sqlite_cursor
-        self.logger = logging.getLogger(__name__)
-
-    def execute(self, sql, params=None):
-        params = params or []
-
-        explain_sql = 'EXPLAIN QUERY PLAN ' + sql
-        self.sqlite_cursor.execute(explain_sql, params)
-        strat = self.sqlite_cursor.fetchall()
-
-        self.logger.info(sql)
-        self.logger.info(strat)
-
-        return self.sqlite_cursor.execute(sql, params)
-
-    def fetchone(self):
-        return self.sqlite_cursor.fetchone()
-
-    def fetchall(self):
-        return self.sqlite_cursor.fetchall()
-
-    def close(self):
-        return self.sqlite_cursor.close()
 
 
 # These are the indexes that we use, on the quads table:
@@ -537,24 +511,26 @@ def db_already_initialized(con: sqlite3.Connection):
         used for some other purpose than ours.
     """
     cur = con.cursor()
+    try:
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        actual_table_names = {r[0] for r in cur.fetchall()}
 
-    cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
-    actual_table_names = {r[0] for r in cur.fetchall()}
+        cur.execute("SELECT name FROM sqlite_master WHERE type='index'")
+        actual_index_names = {r[0] for r in cur.fetchall()}
 
-    cur.execute("SELECT name FROM sqlite_master WHERE type='index'")
-    actual_index_names = {r[0] for r in cur.fetchall()}
+        # Among the actual tables and indices, there will be special ones like 'sqlite_sequence'.
+        # We don't want to worry about those, so we just check that all expected ones are present.
+        if expected_table_names.issubset(actual_table_names) and expected_index_names.issubset(actual_index_names):
 
-    # Among the actual tables and indices, there will be special ones like 'sqlite_sequence'.
-    # We don't want to worry about those, so we just check that all expected ones are present.
-    if expected_table_names.issubset(actual_table_names) and expected_index_names.issubset(actual_index_names):
+            # Check that string IDs start at 3
+            R = cur.execute("SELECT rowid FROM strings WHERE rowid <= 3").fetchall()
+            if len(R) != 1 or R[0][0] != 3:
+                raise BadDatabase
 
-        # Check that string IDs start at 3
-        R = cur.execute("SELECT rowid FROM strings WHERE rowid <= 3").fetchall()
-        if len(R) != 1 or R[0][0] != 3:
+            return True
+        elif len(actual_table_names) == 0 and len(actual_index_names) == 0:
+            return False
+        else:
             raise BadDatabase
-
-        return True
-    elif len(actual_table_names) == 0 and len(actual_index_names) == 0:
-        return False
-    else:
-        raise BadDatabase
+    finally:
+        cur.close()
