@@ -171,4 +171,4 @@ def print_open_cursor_traces(limit=5):
         print("%" * 80)
         print(uid)
         for line in trace:
-            print(line)
+            print(line.rstrip('\n'))
